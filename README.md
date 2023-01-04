@@ -38,3 +38,5 @@ esac
 
 https://github.com/freijn/ADS-B-FlightTracker-counter/blob/main/Capture.JPG
 
+https://github.com/freijn/ADS-B-FlightTracker-counter/blob/main/domoticz.jpg
+
