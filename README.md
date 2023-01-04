@@ -36,4 +36,5 @@ esac
 */1 * * * * /home/pi/flycheck.sh >> /home/pi/my.log 2>&1
 ```
 
-![Screenshot](Capture.jpg)
+https://github.com/freijn/ADS-B-FlightTracker-counter/blob/main/Capture.JPG
+
