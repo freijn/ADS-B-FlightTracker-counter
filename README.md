@@ -17,6 +17,7 @@ For this I have a job running every 1 min to check and restart if required.
 
 
 - create file /home/pi/flycheck.sh  with the content :
+```
 #! /bin/bash
 
 case "$(pidof python home/pi/fly.py | wc -w)" in
@@ -28,8 +29,10 @@ case "$(pidof python home/pi/fly.py | wc -w)" in
 *)  kill $(pidof python /home/pi/fly.py | awk '{print $1}')
     ;;
 esac
-
+```
 
 - add this line into the crontab   ( edit via crontab -e)
+```
 */1 * * * * /home/pi/flycheck.sh >> /home/pi/my.log 2>&1
+```
 
