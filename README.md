@@ -36,4 +36,4 @@ esac
 */1 * * * * /home/pi/flycheck.sh >> /home/pi/my.log 2>&1
 ```
 
-![Screenshot](capture.jpg)
+![Screenshot](Capture.jpg)
