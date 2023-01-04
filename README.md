@@ -1,5 +1,5 @@
 # ADS-B-FlightTracker-counter
-ADS-B  flight tracker counter for Home Assistant or Domoticz  Python
+ADS-B  flight tracker counter for Home Assistant or Domoticz  Python 3.0
 
 If you do have your own ADS-B receiver with a dongle and Raspberry Pi than this is your next step 
 if you also run HomeAssistant or Domoticz.
@@ -11,6 +11,7 @@ If an airplane flies into the defined circle ( 10 Km by default )  around your p
 This is then sent to eighter sent via MQTT to Home Assistant of via HTTP json to Domoticz.
 All free configurable in the first part of the file.
 
+This process does just read the file, so runs nice and quiet next to your favorite tracker installation.
 
 As both processes read the file, sometimes the python does crash. Have not yet been able to catch this error. 
 For this I have a job running every 1 min to check and restart if required.
