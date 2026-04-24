@@ -1,0 +1,302 @@
+#####################################################
+#Frank Reijn's airplane to Camera Pyhton script.
+# Version 3.0
+# This script is loading the flights json file and print all the objects with the key "flight"
+# Additional of  the following libraries in python are required : math,time,requests
+# The install command is depending on the OS. Please use google for HowTo.
+# Many thanks to Ilaria for helping out here.
+# By removing some libraries speed has increased a lot compaired with the older script.
+#Added commands to drive the SX20 PTZ camera
+######################################################
+
+import math
+import time
+import requests
+import time
+from requests.auth import HTTPBasicAuth
+from time import gmtime, strftime
+import sys  
+
+#####################################################################
+# Variables to adjust to the local environment                
+#####################################################################
+debug =1 			 #debug on = 1
+domoip = "192.168.1.155" #Domoticz ip address
+domoport = "8080"    #Domoticz Port
+lonhome = 4.8909126  #Home position longitude Dam
+lathome = 52.373095  #Home Position latiude Dam
+distfm = 10   		 #max dist radius in km's 
+altfm = 37000  		 #max altitude in meters
+refreshtimer=900    #refresh in seconds, to avoid red sensors in quiet times.
+LoopTime = 1		 #Script looptime in sec
+#The idx numbers of the sensors made in Domoticz
+Textidx = "128"      #the text sensor idx  "current airplane flying" , set to "" if not used
+Airplaneidx = "87"   #the airplane counter sensor , set to "" if not used
+LifeLineridx = "98"  #the Lifeliner Heli counter sensor , set to "" if not used
+Policeidx = "99"     #the Police Heli counter sensor , set to "" if not used
+########################################################################
+
+#Var init, do not change
+pfli = 0
+plon = 0
+plat = 0
+pdist = 0
+palt = 0
+tick1=0 			 #keep alive timer
+Aircraftname = ""
+cam=0 				#Cam drive on/off
+rom=0  #niet vergeten weg te halen
+
+#Define logging paramters
+import logging
+logger = logging.getLogger('fly')
+hdlr = logging.FileHandler('/var/tmp/fly.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr) 
+logger.setLevel(logging.WARNING)
+
+#call url and write message
+def domo(urlmessage):
+	r=requests.get(urlmessage)
+
+#distance calculator
+def distance(lat1, lng1, lat2, lng2):
+    #return distance as meter if you want km distance, remove "* 1000"
+    radius = 6371 * 1000 
+    dLat = (lat2-lat1) * math.pi / 180
+    dLng = (lng2-lng1) * math.pi / 180
+    lat1 = lat1 * math.pi / 180
+    lat2 = lat2 * math.pi / 180
+    val = math.sin(dLat/2) * math.sin(dLat/2) + math.sin(dLng/2) * math.sin(dLng/2) * math.cos(lat1) * math.cos(lat2)    
+    ang = 2 * math.atan2(math.sqrt(val), math.sqrt(1-val))
+    return radius * ang
+
+#Angle Calculator	
+def angleFromCoordinate(lat1, long1, lat2, long2):
+	dLon = (long2 - long1)
+
+	y = math.sin(dLon) * math.cos(lat2)
+	x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dLon)
+
+	brng = math.atan2(y, x)
+
+	brng = math.degrees(brng)
+	brng = (brng + 360) % 360
+	#brng = 360 - brng # count degrees clockwise - remove to make counter-clockwise
+
+	return brng	
+	
+
+
+#find element key from the just read line	
+def elementline(line,key):
+	fin=fink=lonf=''
+	fin = (line.find("\""+key,0,len(line))) #find "
+	if fin != -1:
+		fink = (line.find(",",fin+1,len(line))) #find ,
+		lonf = line[ fin + len(key)+3 : fink]  # grab final string
+		lonf = lonf.replace('"', '') #remove "
+		lonf = lonf.replace(' ', '') #remove space
+	else :
+		lonf = -1
+	return lonf
+
+
+#drive sx20  pan 0-850   tilt 0-255  zoom 0-2800 
+def drivesx20(pan,tilt,zoom):
+	if debug:
+		print ( "pan : ", pan , "tilt = " , tilt , "zoom = " , zoom)
+
+	if pan > 90 and pan < 270 :
+		if debug:
+			print ("Airplane not in ViewWindow.")
+		return
+
+	sxpan = round(pan)
+	if sxpan > 269:
+		sxpan = sxpan -270
+	else : 
+		sxpan = sxpan + 90
+	
+	sxpan = str(abs(round(sxpan * ( 850 /180 )-850)+175))
+	sxtilt = str(round(tilt * (255/80)+50))
+	sxzoom = str(round((zoom * 100) * (10000/2800)))
+	#sxzoom = str(2200)
+	if debug:
+		print ( "Sxpan : ", sxpan , "sxtilt = " , sxtilt , "sxzoom = " , sxzoom)
+
+	#	url = 'http://192.168.1.35/formputxml?xmldoc=<Command><Camera><PositionSet command=%22True%22><CameraId>1</CameraId><Pan>465</Pan><Tilt>25</Tilt><Zoom>1124</Zoom></PositionSet></Camera></Command>'
+		url = 'http://192.168.1.38/formputxml?xmldoc=<Command><Camera><PositionSet command=%22True%22><CameraId>1</CameraId><Pan>' + sxpan +'</Pan><Tilt>' + sxtilt + '</Tilt><Zoom>' + sxzoom + '</Zoom></PositionSet></Camera></Command>'
+
+
+	response = requests.get(url)
+
+	if response.status_code == 401:    
+		response = requests.get( url, auth=HTTPBasicAuth('frank', 'bram101'))
+
+	if response.status_code != 200:
+		print ("Error, not 200")
+	# Definitely something's wrong
+	
+
+#write near plane text file for OBS to pickup
+def nearplanefile(nearplane):
+	file = open("nearplane.txt","w")
+	file.write(nearplane)
+	file.close()
+
+
+		
+	
+#############################################
+#Start main routine, this is the loop       #
+#############################################
+
+def main():
+	global pdist
+	global plon
+	global plat
+	global palt
+	global pfli
+	global tick1
+	global tick2
+	global rline
+	global Aircraftname
+	global filepath
+	global rom
+	
+	 
+	if (time.time() - tick1) > refreshtimer:
+		if debug:
+			print (">>>Refresh URL called<<<")
+			
+		# call counter with dummy zero for keep alive ( Sensor red avoidance )
+		if Airplaneidx !="":
+			domo('http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+Airplaneidx+'&svalue=0')
+		if LifeLineridx !="":
+			domo('http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+LifeLineridx+'&svalue=0')
+		if Policeidx !="":
+			domo('http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+Policeidx+'&svalue=0')
+		tick1 = time.time()
+	
+	filepath = '/run/dump1090-fa/aircraft.json' #path to the aircraft file
+	try:
+		with open(filepath) as fp:
+			pdist=100
+			rline =1
+			while rline:
+				rline = fp.readline()
+				#find long
+				rlon= elementline(rline,"lon")
+				#find Lat
+				rlat = elementline(rline,"lat")
+				#find altitude
+				ralt= elementline(rline,"alt_baro")
+				#print ("Ralt=",ralt)
+				if rlat != -1:
+					ralt = str(int( int(ralt) / 3.281 )) #convert Feet to meters
+				#find flight
+				rfli= elementline(rline,"flight")
+				if rlon != -1 and rlat != -1: 
+					dist= round((distance(lonhome,lathome,float(rlon),float(rlat))/1000))			
+				if rfli != -1 and ralt != -1 and rlat != -1 and rlon != -1 :
+					dist = int(dist)
+					ralt = int(ralt)
+					if dist < distfm :
+						if dist < pdist and ralt <altfm :
+							pfli = rfli
+							plon = float(rlon)
+							plat = float(rlat)
+							palt = int(ralt)
+							pdist = dist+1
+		fp.close()
+	except IOError:
+		if (debug):
+			print("File open error!!!")
+		logger.error('File open Error!')	
+	
+	if pdist > distfm :
+		pfli = 0
+		plon = 0
+		plat = 0
+		palt = 0
+		pdist = 100
+		strtoprint= 'http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+Textidx+'&nvalue=0&svalue=No Airplane in < 10 Km'
+		if (cam):
+			rom = rom +100
+			drivesx20(rom,10,10)
+			print("Rom=",rom)
+		if (time.time() - tick2) > refreshtimer:
+			domo(strtoprint)
+			tick2=time.time()
+		if Aircraftname != "None":	
+			Aircraftname = "None"
+			domo(strtoprint)
+		if debug:
+			#print("\033c", end="")
+			print ( ">No aircraft loop<",strftime("%H:%M:%S", time.localtime()))
+			print ( "ReFresh time count >",int(time.time() - tick1))
+	else:
+		if debug:
+			#print("\033c", end="")
+			print ("Nearby airplane now : ",strftime("%H:%M:%S", gmtime()))
+			print ( "Flight = ",pfli)
+			print ( "Lon = ",str(plon))
+			print ( "Lat = ",str(plat))
+			print ( "Alt = ",str(palt))
+			print ( "Dist = ",str(pdist))
+		strtoprint= 'http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+Textidx+'&nvalue=0&svalue='+'AirplaneName='+pfli+'  Distance='+str(pdist) + '  Alt=' + str(palt)
+		if Textidx !="":
+			#tijdelijk uit domo(strtoprint)
+			print("geen domo update")
+				
+		#sx20 section -----------------------
+		if (cam):
+			if (debug):
+				print("Cam switch On")
+			nearplanefile("Flight: " + pfli + " Dist: " + str(pdist) + " Alt : " + str(palt))
+			compass = round(angleFromCoordinate(lathome, lonhome, plat, plon))
+			angle = round(math.degrees(math.atan(palt/(round(pdist*1000)))))
+			drivesx20(compass,angle,pdist)
+			
+		if Aircraftname != pfli:
+			if debug:
+				print ("New Aircraft found!")
+			#increase aircraft counter +1
+			if Airplaneidx !="":
+				domo('http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+Airplaneidx+'&svalue=1')
+			if "LIFELN" in pfli :
+				#add to lifeliner counter
+				if LifeLineridx != "":
+					domo('http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+LifeLineridx+'&svalue=1')
+			if "ZXP" in pfli :
+				#add to Policeliner counter
+				if Policeidx != "":
+					domo('http://'+domoip+':'+domoport+'/json.htm?type=command&param=udevice&idx='+Policeidx+'&svalue=1')
+			Aircraftname = pfli
+	
+		
+	time.sleep(LoopTime)	
+
+	
+if __name__ == '__main__':
+	logger.info('FlyMonitor script started :-)')
+	if len(sys.argv) > 1:
+		if (sys.argv[1] == 'sx20on'):
+			cam =1
+			logger.info('SX20 switched on :-)')
+			if debug:
+				print("SX20 on")
+		else: 
+			cam=0
+			logger.info('SX20 switched off :-)')
+			if debug:
+				print("SX20 off")
+
+	#get start time in ticks
+	tick1=time.time()
+	tick2=time.time()
+	while (1):
+		main()
+	
